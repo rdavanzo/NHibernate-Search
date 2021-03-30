@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Data;
+using System.Data.Common;
 using System.Reflection;
 
 using log4net;
@@ -77,7 +78,7 @@ namespace NHibernate.Test
         /// <summary>
         /// Creates the tables used in this TestCase
         /// </summary>
-        [TestFixtureSetUp]
+        [SetUp]
         public void TestFixtureSetUp()
         {
             if (!RunFixtureSetUpAndTearDownForEachTest)
@@ -113,7 +114,7 @@ namespace NHibernate.Test
         /// will occur if the TestCase does not have the same hbm.xml files
         /// included as a previous one.
         /// </remarks>
-        [TestFixtureTearDown]
+        [TearDown]
         public void TestFixtureTearDown()
         {
             if (!RunFixtureSetUpAndTearDownForEachTest)
@@ -155,7 +156,7 @@ namespace NHibernate.Test
 
             if (fail)
             {
-                Assert.Fail("Test didn't clean up after itself");
+                Assert.Fail($"Test didn't clean up after itself - session closed: {wasClosed}; database cleaned: {wasCleaned}; connections closed: {wereConnectionsClosed}");
             }
 
             if (RunFixtureSetUpAndTearDownForEachTest)
@@ -213,7 +214,7 @@ namespace NHibernate.Test
 
             using (IConnectionProvider prov = ConnectionProviderFactory.NewConnectionProvider(cfg.Properties))
             {
-                IDbConnection conn = prov.GetConnection();
+                DbConnection conn = prov.GetConnection();
 
                 try
                 {
@@ -276,9 +277,9 @@ namespace NHibernate.Test
             }
 
             /*foreach (Mapping.Collection coll in configuration.CollectionMappings)
-			{
-				configuration.SetCacheConcurrencyStrategy(coll.Role, CacheConcurrencyStrategy);
-			}*/
+            {
+                configuration.SetCacheConcurrencyStrategy(coll.Role, CacheConcurrencyStrategy);
+            }*/
         }
 
         #endregion

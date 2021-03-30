@@ -1,7 +1,11 @@
 using System.Collections;
 using System.Data;
+using System.Data.Common;
 using Lucene.Net.Analysis;
+using Lucene.Net.Analysis.Core;
 using Lucene.Net.QueryParsers;
+using Lucene.Net.QueryParsers.Classic;
+using Lucene.Net.Util;
 using NHibernate.Search.Impl;
 using NUnit.Framework;
 
@@ -23,7 +27,7 @@ namespace NHibernate.Search.Tests.Session
             int loop = 14;
             for (int i = 0; i < loop; i++)
             {
-                using (IDbCommand cmd = s.Connection.CreateCommand())
+                using (DbCommand cmd = s.Connection.CreateCommand())
                 {
                     s.Transaction.Enlist(cmd);
                     cmd.CommandText = "insert into Email(Id, Title, Body, Header) values( + " + (i + 1)
@@ -53,7 +57,7 @@ namespace NHibernate.Search.Tests.Session
             s.Clear();
 
             tx = s.BeginTransaction();
-            QueryParser parser = new QueryParser("id", new StopAnalyzer());
+            QueryParser parser = new QueryParser(LuceneVersion.LUCENE_48, "id", new StopAnalyzer(LuceneVersion.LUCENE_48));
             IList result = s.CreateFullTextQuery(parser.Parse("Body:create")).List();
             Assert.AreEqual(14, result.Count);
 
@@ -78,7 +82,7 @@ namespace NHibernate.Search.Tests.Session
             // check non created object does get found!!1
             s = new FullTextSessionImpl(OpenSession());
             tx = s.BeginTransaction();
-            QueryParser parser = new QueryParser("id", new StopAnalyzer());
+            QueryParser parser = new QueryParser(LuceneVersion.LUCENE_48, "id", new StopAnalyzer(LuceneVersion.LUCENE_48));
             IList result = s.CreateFullTextQuery(parser.Parse("Body:create")).List();
             Assert.IsEmpty(result);
             tx.Commit();
@@ -86,7 +90,7 @@ namespace NHibernate.Search.Tests.Session
 
             s = new FullTextSessionImpl(OpenSession());
             s.Transaction.Begin();
-            using (IDbCommand cmd = s.Connection.CreateCommand()) 
+            using (DbCommand cmd = s.Connection.CreateCommand()) 
             {
                 s.Transaction.Enlist(cmd);
                 cmd.CommandText = "update Email set Body='Meet the guys who write the software'";
@@ -102,7 +106,7 @@ namespace NHibernate.Search.Tests.Session
 
             s = new FullTextSessionImpl(OpenSession());
             tx = s.BeginTransaction();
-            parser = new QueryParser("id", new StopAnalyzer());
+            parser = new QueryParser(LuceneVersion.LUCENE_48, "id", new StopAnalyzer(LuceneVersion.LUCENE_48));
             result = s.CreateFullTextQuery(parser.Parse("Body:write")).List();
             Assert.IsEmpty(result);
             result = s.CreateCriteria(typeof (Email)).List();

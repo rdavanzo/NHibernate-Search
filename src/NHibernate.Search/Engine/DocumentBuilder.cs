@@ -2,11 +2,10 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
-using Iesi.Collections.Generic;
 using Lucene.Net.Analysis;
 using Lucene.Net.Documents;
 using Lucene.Net.Index;
-using NHibernate.Search.Attributes;
+using NHibernate.Proxy;
 using NHibernate.Search.Backend;
 using NHibernate.Search.Bridge;
 using NHibernate.Search.Impl;
@@ -14,30 +13,25 @@ using NHibernate.Search.Mapping;
 using NHibernate.Search.Store;
 using NHibernate.Search.Util;
 using NHibernate.Util;
+using Index = NHibernate.Search.Attributes.Index;
 
 namespace NHibernate.Search.Engine
 {
-    using Proxy;
-
-    using Type = System.Type;
-    
     /// <summary>
     /// Set up and provide a manager for indexes classes
     /// </summary>
     public class DocumentBuilder
     {
         public const string CLASS_FIELDNAME = "_hibernate_class";
-		private static readonly IInternalLogger logger = LoggerProvider.LoggerFor(typeof(DocumentBuilder));
+        private static readonly INHibernateLogger logger = NHibernateLogger.For(typeof(DocumentBuilder));
 
         private readonly IDirectoryProvider[] directoryProviders;
         private readonly IIndexShardingStrategy shardingStrategy;
         private readonly ScopedAnalyzer analyzer;
         private DocumentIdMapping idMapping;
-        private Iesi.Collections.Generic.ISet<Type> mappedSubclasses = new HashedSet<System.Type>();
+        private ISet<System.Type> mappedSubclasses = new HashSet<System.Type>();
 
         private readonly DocumentMapping rootClassMapping;
-
-        #region Constructors
 
         public DocumentBuilder(DocumentMapping classMapping, Analyzer defaultAnalyzer, IDirectoryProvider[] directoryProviders,
                                IIndexShardingStrategy shardingStrategy)
@@ -50,7 +44,7 @@ namespace NHibernate.Search.Engine
 
             rootClassMapping = classMapping;
 
-            Set<System.Type> processedClasses = new HashedSet<System.Type>();
+            ISet<System.Type> processedClasses = new HashSet<System.Type>();
             processedClasses.Add(classMapping.MappedClass);
             CollectAnalyzers(rootClassMapping, defaultAnalyzer, true, string.Empty, processedClasses);
             //processedClasses.remove( clazz ); for the sake of completness
@@ -59,43 +53,18 @@ namespace NHibernate.Search.Engine
                 throw new SearchException("No document id for: " + classMapping.MappedClass.Name);
         }
 
-        #endregion
+        public Analyzer Analyzer => analyzer;
 
-        #region Property methods
+        public IDirectoryProvider[] DirectoryProviders => directoryProviders;
 
-        public Analyzer Analyzer
-        {
-            get { return analyzer; }
-        }
+        public IIndexShardingStrategy DirectoryProvidersSelectionStrategy => shardingStrategy;
 
-        public IDirectoryProvider[] DirectoryProviders
-        {
-            get { return directoryProviders; }
-        }
+        public ITwoWayFieldBridge IdBridge => idMapping.Bridge;
 
-        public IIndexShardingStrategy DirectoryProvidersSelectionStrategy
-        {
-            get { return shardingStrategy; }
-        }
+        public ISet<System.Type> MappedSubclasses => mappedSubclasses;
 
-        public ITwoWayFieldBridge IdBridge
-        {
-            get { return idMapping.Bridge; }
-        }
+        public string IdentifierName => idMapping.PropertyName;
 
-        public Iesi.Collections.Generic.ISet<System.Type> MappedSubclasses
-        {
-            get { return mappedSubclasses; }
-        }
-
-        public string IdentifierName
-        {
-            get { return idMapping.PropertyName; }
-        }
-
-        #endregion
-
-        #region Public methods
 
         /// <summary>
         /// This add the new work to the queue, so it can be processed in a batch fashion later
@@ -159,31 +128,22 @@ namespace NHibernate.Search.Engine
             }
 
             /**
-		     * When references are changed, either null or another one, we expect dirty checking to be triggered (both sides
-		     * have to be updated)
-		     * When the internal object is changed, we apply the {Add|Update}Work on containedIns
-		    */
+             * When references are changed, either null or another one, we expect dirty checking to be triggered (both sides
+             * have to be updated)
+             * When the internal object is changed, we apply the {Add|Update}Work on containedIns
+            */
             if (searchForContainers)
             {
                 ProcessContainedIn(entity, queue, rootClassMapping, searchFactoryImplementor);
             }
         }
 
-        public Document GetDocument(object instance, object id, Type entityType)
+        public Document GetDocument(object instance, object id, System.Type entityType)
         {
-            Document doc = new Document();
-
-            if (rootClassMapping.Boost != null)
-            {
-                doc.SetBoost(rootClassMapping.Boost.Value);
-            }
+            var doc = new Document();
 
             // TODO: Check if that should be an else?
-            {
-                Field classField = new Field(CLASS_FIELDNAME, TypeHelper.LuceneTypeName(entityType), Field.Store.YES, Field.Index.UN_TOKENIZED);
-                doc.Add(classField);
-                idMapping.Bridge.Set(idMapping.Name, id, doc, Field.Store.YES, Field.Index.UN_TOKENIZED, idMapping.Boost);
-            }
+            idMapping.Bridge.Set(idMapping.Name, id, doc, Field.Store.YES);
 
             BuildDocumentFields(instance, doc, rootClassMapping, string.Empty);
             return doc;
@@ -243,14 +203,14 @@ namespace NHibernate.Search.Engine
             return result;
         }
 
-        public void PostInitialize(Iesi.Collections.Generic.ISet<System.Type> indexedClasses)
+        public void PostInitialize(ISet<System.Type> indexedClasses)
         {
             // this method does not requires synchronization
-            Type plainClass = rootClassMapping.MappedClass;
-            Iesi.Collections.Generic.ISet<Type> tempMappedSubclasses = new HashedSet<System.Type>();
+            System.Type plainClass = rootClassMapping.MappedClass;
+            ISet<System.Type> tempMappedSubclasses = new HashSet<System.Type>();
 
             // together with the caller this creates a o(2), but I think it's still faster than create the up hierarchy for each class
-            foreach (Type currentClass in indexedClasses)
+            foreach (System.Type currentClass in indexedClasses)
             {
                 if (plainClass.IsAssignableFrom(currentClass))
                 {
@@ -261,10 +221,6 @@ namespace NHibernate.Search.Engine
             mappedSubclasses = tempMappedSubclasses;
         }
 
-        #endregion
-
-        #region Private methods
-
         private void BuildDocumentFields(Object instance, Document doc, DocumentMapping classMapping, string prefix)
         {
             if (instance == null)
@@ -272,7 +228,7 @@ namespace NHibernate.Search.Engine
                 return;
             }
 
-            object unproxiedInstance = Unproxy(instance);
+            var unproxiedInstance = Unproxy(instance);
             foreach (var bridge in classMapping.ClassBridges)
             {
                 var bridgeName = prefix + bridge.Name;
@@ -282,16 +238,12 @@ namespace NHibernate.Search.Engine
                         bridgeName,
                         unproxiedInstance,
                         doc,
-                        GetStore(bridge.Store),
-                        GetIndex(bridge.Index),
-                        bridge.Boost
+                        GetStore(bridge.Store)
                     );
                 }
                 catch (Exception e)
                 {
-                    logger.Error(
-                        string.Format(CultureInfo.InvariantCulture, "Error processing class bridge for {0}",
-                                      bridgeName), e);
+                    logger.Error(e, "Error processing class bridge for {0}", bridgeName);
                 }
             }
 
@@ -316,16 +268,12 @@ namespace NHibernate.Search.Engine
                     fieldName,
                     value,
                     doc,
-                    GetStore(fieldMapping.Store),
-                    GetIndex(fieldMapping.Index),
-                    fieldMapping.Boost
+                    GetStore(fieldMapping.Store)
                 );
             }
             catch (Exception e)
             {
-                logger.Error(
-                    string.Format(CultureInfo.InvariantCulture, "Error processing field bridge for {0}.{1}",
-                                  unproxiedInstance.GetType().FullName, fieldName), e);
+                logger.Error(e, "Error processing field bridge for {0}.{1}", unproxiedInstance.GetType().FullName, fieldName);
             }
         }
 
@@ -379,23 +327,6 @@ namespace NHibernate.Search.Engine
             return -1;
         }
 
-        private static Field.Index GetIndex(Index index)
-        {
-            switch (index)
-            {
-                case Index.No:
-                    return Field.Index.NO;
-                case Index.NoNorms:
-                    return Field.Index.NO_NORMS;
-                case Index.Tokenized:
-                    return Field.Index.TOKENIZED;
-                case Index.UnTokenized:
-                    return Field.Index.UN_TOKENIZED;
-                default:
-                    throw new AssertionFailure("Unexpected Index: " + index);
-            }
-        }
-
         private static Field.Store GetStore(Attributes.Store store)
         {
             switch (store)
@@ -404,15 +335,13 @@ namespace NHibernate.Search.Engine
                     return Field.Store.NO;
                 case Attributes.Store.Yes:
                     return Field.Store.YES;
-                case Attributes.Store.Compress:
-                    return Field.Store.COMPRESS;
                 default:
                     throw new AssertionFailure("Unexpected Store: " + store);
             }
         }
 
         private void CollectAnalyzers(
-            DocumentMapping @class, Analyzer parentAnalyzer, bool isRoot, string prefix, Iesi.Collections.Generic.ISet<System.Type> processedClasses
+            DocumentMapping @class, Analyzer parentAnalyzer, bool isRoot, string prefix, ISet<System.Type> processedClasses
         )
         {
             foreach (var bridge in @class.ClassBridges)
@@ -444,7 +373,7 @@ namespace NHibernate.Search.Engine
             }
         }
 
-        private void CollectAnalyzer(FieldMapping field, Analyzer parentAnalyzer, string prefix) 
+        private void CollectAnalyzer(FieldMapping field, Analyzer parentAnalyzer, string prefix)
         {
             // Field > property > entity analyzer
             var localAnalyzer = field.Analyzer ?? parentAnalyzer;
@@ -465,7 +394,7 @@ namespace NHibernate.Search.Engine
                     fields,
                     result,
                     document
-               );                
+               );
             }
 
             foreach (var embedded in mapping.Embedded)
@@ -483,7 +412,8 @@ namespace NHibernate.Search.Engine
         private static void PopulateResult(
             string fieldName, IFieldBridge fieldBridge, Attributes.Store fieldStore,
             string[] fields, object[] result, Document document
-        ) {
+        )
+        {
             int matchingPosition = GetFieldPosition(fields, fieldName);
             if (matchingPosition != -1)
             {
@@ -491,7 +421,7 @@ namespace NHibernate.Search.Engine
                 if (fieldStore != Attributes.Store.No && fieldBridge is ITwoWayFieldBridge)
                 {
                     result[matchingPosition] = ((ITwoWayFieldBridge)fieldBridge).Get(fieldName, document);
-                    if (logger.IsInfoEnabled)
+                    if (logger.IsInfoEnabled())
                     {
                         logger.Info("Field " + fieldName + " projected as " + result[matchingPosition]);
                     }
@@ -539,7 +469,7 @@ namespace NHibernate.Search.Engine
                     IEnumerable collection = value as IEnumerable;
                     if (typeof(IDictionary).IsAssignableFrom(value.GetType()))
                     {
-                        collection = ((IDictionary) value).Values;
+                        collection = ((IDictionary)value).Values;
                     }
 
                     if (collection == null)
@@ -589,7 +519,5 @@ namespace NHibernate.Search.Engine
             var proxy = value as INHibernateProxy;
             return proxy == null ? value : proxy.HibernateLazyInitializer.GetImplementation();
         }
-
-        #endregion
     }
 }

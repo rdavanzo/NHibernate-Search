@@ -1,3 +1,7 @@
+using Lucene.Net.Analysis.Core;
+using Lucene.Net.QueryParsers.Classic;
+using Lucene.Net.Util;
+
 namespace NHibernate.Search.Tests
 {
     using System.Collections;
@@ -32,7 +36,7 @@ namespace NHibernate.Search.Tests
             s.Clear();
 
             tx = s.BeginTransaction();
-            QueryParser parser = new QueryParser("Brand", new StopAnalyzer());
+            QueryParser parser = new QueryParser(LuceneVersion.LUCENE_48, "Brand", new StopAnalyzer(LuceneVersion.LUCENE_48));
 
             Lucene.Net.Search.Query query = parser.Parse("Brand:Seiko");
             IQuery hibQuery = s.CreateFullTextQuery(query, typeof(Clock), typeof(Book));
@@ -60,8 +64,8 @@ namespace NHibernate.Search.Tests
         [Test]
         public void PurgeAll()
         {
-            IFullTextSession s = Search.CreateFullTextSession(OpenSession());
-            ITransaction tx = s.BeginTransaction();
+            using IFullTextSession s = Search.CreateFullTextSession(OpenSession());
+            using ITransaction tx = s.BeginTransaction();
             Clock clock = new Clock(1, "Seiko");
             s.Save(clock);
             clock = new Clock(2, "Festina");
@@ -77,14 +81,13 @@ namespace NHibernate.Search.Tests
             tx.Commit();
             s.Clear();
 
-            tx = s.BeginTransaction();
-            QueryParser parser = new QueryParser("Brand", new StopAnalyzer());
-            tx = s.BeginTransaction();
+            QueryParser parser = new QueryParser(LuceneVersion.LUCENE_48, "Brand", new StopAnalyzer(LuceneVersion.LUCENE_48));
+            using ITransaction tx2 = s.BeginTransaction();
             s.PurgeAll(typeof(Clock));
 
-            tx.Commit();
+            tx2.Commit();
 
-            tx = s.BeginTransaction();
+            using ITransaction tx3 = s.BeginTransaction();
 
             Lucene.Net.Search.Query query = parser.Parse("Brand:Festina or Brand:Seiko or Brand:Longine or Brand:Rolex");
             IQuery hibQuery = s.CreateFullTextQuery(query, typeof(Clock), typeof(Book));
@@ -96,8 +99,9 @@ namespace NHibernate.Search.Tests
             results = hibQuery.List();
             Assert.AreEqual(2, results.Count, "incorrect class purged");
 
-            s.Delete("from System.Object");
-            tx.Commit();
+            int countDeleted = s.Delete("from System.Object");
+            Assert.AreEqual(0, countDeleted);
+            tx3.Commit();
             s.Close();
         }
 
